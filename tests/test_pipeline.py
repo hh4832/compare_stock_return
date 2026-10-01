@@ -14,6 +14,7 @@ def test_end_to_end_and_failure_preserves_latest(tmp_path, assets):
         drive_output_root=str(tmp_path),
         progress=False,
         display_symbols=["A"],
+        missing_data_policy="error",
     )
     result = run(c, assets)
     path = result["run_path"]

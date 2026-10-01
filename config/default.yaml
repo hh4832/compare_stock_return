@@ -33,3 +33,4 @@ portfolios:
     TW:009816: 0.3
     US:VOO: 0.5
     US:VGT: 0.2
+missing_data_policy: warn

@@ -34,7 +34,7 @@ def test_mapping_no_double_count(rows):
 def test_gap_fatal(rows, column, index):
     rows[index][column] = None
     with pytest.raises(DataQualityError):
-        normalize(rows)
+        normalize(rows, policy="error")
 
 
 def test_duplicate_order_invalid(rows):

@@ -18,6 +18,7 @@ def main() -> None:
     )
     parser.add_argument("--assets", nargs="+")
     parser.add_argument("--fx-mode", default="none")
+    parser.add_argument("--missing-data-policy", choices=["error", "warn", "ignore"])
     parser.add_argument("--benchmark")
     parser.add_argument(
         "--date-mode", choices=["intersection", "full_history", "custom"]
@@ -34,6 +35,7 @@ def main() -> None:
         ("symbols", "symbols"),
         ("assets", "assets"),
         ("fx_mode", "fx_mode"),
+        ("missing_data_policy", "missing_data_policy"),
         ("benchmark", "benchmark"),
         ("date_mode", "date_mode"),
         ("return_type", "return_type"),

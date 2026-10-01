@@ -90,6 +90,8 @@ def export_charts(prices: dict, rolling: dict, config, destination: Path) -> Non
     end = max(p.index[-1] for p in displayed.values()).date()
     for name, (series, label) in specs.items():
         title = f"LOCAL CURRENCY RETURNS — FX EXCLUDED | {name.replace('_', ' ')} | {start} → {end} | {config.return_type}"
+        if getattr(config, "data_quality_warning", False):
+            title += " | DAILY_METRICS_HAVE_MISSING_SESSION_WARNING"
         if name == "rolling_excess_return":
             title += f" | benchmark {config.benchmark}"
         if config.date_mode == "full_history":

@@ -29,7 +29,7 @@ def test_invalid_config(kwargs):
 def test_missing(assets):
     assets["A"].iloc[30, 0] = np.nan
     with pytest.raises(DataQualityError) as error:
-        validate_assets(assets)
+        validate_assets(assets, policy="error")
     assert error.value.report.iloc[0].unexpected_missing_count == 1
     date = str(assets["A"].index[30].date())
     report = validate_assets(assets, {"A": {date: "market_suspension"}})

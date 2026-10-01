@@ -42,8 +42,8 @@ Common calendar start = max(each first usable date), end = min(each last usable 
 Each asset retains **all its own observations inside that window**, including dates when the other market is closed. Different observation counts are allowed. No intersection across markets, ffill/bfill, synthetic zero returns or invented prices.
 Each metric records its actual first/last observed dates alongside common calendar boundaries. When a boundary is a holiday in one market, its first/last observation is inside the window; no stale boundary price is manufactured. CAGR uses those actual observation dates, with that small endpoint difference explicitly visible.
 
-Provider frames must have sorted unique DatetimeIndex and positive finite prices. Internal missing raw/adjusted prices are fatal except explicit date-specific suspension/non-trading evidence. Tiingo returned sessions with missing prices, including boundary rows, fail. **Tiingo missing session rows are not independently verified against an exchange calendar in this first version**; provider-returned sessions are the observation contract. Another market's dates never determine missing sessions. Entire missing months in a model portfolio fail.
-0050 known suspensions (2025-06-11/12/13/16/17) are centrally configured as `market_suspension`; unexplained gaps remain fatal. Large suspensions can distort annualization at 252 observations/year.
+Provider frames must have sorted unique DatetimeIndex and positive finite prices. Missing observations use the explicit policy below. Tiingo returned sessions with missing prices, including boundary rows, are audited under that same policy. **Tiingo missing session rows are not independently verified against an exchange calendar in this first version**; provider-returned sessions are the observation contract. Another market's dates never determine missing sessions. Entire missing months in a model portfolio fail.
+0050 known suspensions (2025-06-11/12/13/16/17) are centrally configured as `market_suspension`; unexplained gaps follow missing_data_policy. Large suspensions can distort annualization at 252 observations/year.
 
 `intersection` means common calendar window. `custom` limits this headline window (strict rejects out-of-range requests). Full history remains supplementary and visibly warns about incomparable periods. Every pair retains its own maximum common calendar window, independently of newer assets/custom headline windows.
 
@@ -64,7 +64,7 @@ Portfolio NAV compounds modeled monthly returns from 100; volatility/Sharpe/Sort
 Root retains `runs/YYYYMMDD_HHMMSS_<unique>/`, `latest/`, and `cache/finlab/`, `cache/tiingo/`.
 Only successful runs promote latest via staged copy/rename and rollback. Historical outputs are never modified. Single writer per root; Drive rename is not distributed atomicity.
 
-`results/`: summary_metrics, intersection_metrics, full_history_metrics, pairwise_metrics, benchmark_metrics, cross_market_monthly_metrics, monthly_returns (long/wide), annual_returns (long/wide), drawdowns, rolling_metrics, model_portfolio_metrics, model_portfolio_monthly_returns, model_portfolio_annual_returns, data_quality_report, assets, fees, plus existing monthly_excess/synthetic_fee/optional holdings outputs (CSV).
+`results/`: summary_metrics, intersection_metrics, full_history_metrics, pairwise_metrics, benchmark_metrics, cross_market_monthly_metrics, monthly_returns (long/wide), annual_returns (long/wide), drawdowns, rolling_metrics, model_portfolio_metrics, model_portfolio_monthly_returns, model_portfolio_annual_returns, data_quality_report, missing_data_details, assets, fees, plus existing monthly_excess/synthetic_fee/optional holdings outputs (CSV).
 `data/`: source_prices, aligned_prices (own-market dates), returns, corporate_actions (Parquet).
 `charts/`: local-currency equity, underwater, rolling returns/volatility/Sharpe and model portfolio equity/drawdown, HTML and PNG.
 Metadata records provider provenance, explicit identifiers/market/currency/provider, common boundaries and per-asset observation counts, pair classifications, FX none, model assumptions, source freshness, environment versions, git SHA and checksums. No credentials.
@@ -100,3 +100,22 @@ Architecture: providers normalize data; data_loader dispatches; alignment/return
   Upside/downside capture = 該組 benchmark 正／負日的 asset 複利報酬 / benchmark 複利報酬。
   Monthly excess 統計只使用兩方完整月份；部分月份仍輸出並標記。
   不顯著結果不得寫成明顯優勝，短樣本不作穩健 alpha 結論。
+
+## Missing-data policy
+
+Notebook `MISSING_DATA_POLICY = "warn"`; YAML/Config `missing_data_policy: warn`; CLI `--missing-data-policy warn`.
+Supported policies:
+
+- `error`: unexplained missing prices raise DataQualityError; both quality reports are retained in the failed run, and latest is unchanged.
+- `warn` (default): log each asset's unexplained missing count and continue with explicit reliability warnings.
+- `ignore`: continue without missing-price warning logs; all details, counts and reliability warnings still appear in reports/metadata.
+
+All policies forbid ffill/bfill and missing-return=0. Invalid/non-positive/non-finite prices remain fatal, including a value opposite a missing price at a history boundary. Entirely missing assets, fewer than two usable price rows, duplicate/unsorted/malformed/NaT indexes remain fatal. FinLab pre/post observed-history padding is outside the active validation period; Tiingo returned boundary rows are explicit sessions and are included.
+
+`results/missing_data_details.csv` has asset_id, date, raw_missing, adjusted_missing, reason, status (EXPLAINED/UNEXPLAINED). Known suspensions use their supplied reason; unknown gaps stay unexplained. `data_quality_report.csv` includes asset_id, counts, validation_status and daily_metrics_reliable. An unexplained gap yields WARNING and False under warn/ignore (ERROR under error). Metadata records the policy and per-asset counts/dates/reliability, including failed quality validations.
+
+Available-price cumulative return/CAGR and observed-price maximum drawdown remain calculable. Missing price rows are explicitly excluded from the analysis, not repaired; raw source_prices.parquet retains NaNs. Returns may connect observations separated by missing source sessions. `returns.parquet` and rolling outputs record missing_sessions_since_previous_observation, unexplained_missing_sessions_since_previous_observation and spans_missing_sessions. These interval returns must not be interpreted as ordinary single-session returns.
+
+Summary/full-history/intersection and rolling outputs flag daily volatility, Sharpe/Sortino and all daily relative metrics through daily_metrics_reliable=False and daily_metrics_status=DAILY_METRICS_HAVE_MISSING_SESSION_WARNING. Numeric estimates are retained for inspection, not declared reliable. Same-market pairwise/benchmark outputs carry that status, missing/excluded session counts and dates for both assets. Flags are conservative at asset-history scope, even if some gaps lie outside a particular comparison window. Charts carry a missing-session caveat.
+
+Monthly/annual outputs remain available and retain reliability flags. When a missing interval crosses a period boundary, its observed endpoint return is attributed to the later observation period; the exact true month/year allocation cannot be reconstructed. Observed MDD may understate an unseen drawdown. Cross-market monthly outputs and model portfolios also retain underlying missing-session warnings. Independent minimum-history and missing-whole-month portfolio guards remain in force; this policy does not fabricate an unavailable month or an exchange-calendar row absent from the provider data.

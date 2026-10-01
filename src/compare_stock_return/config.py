@@ -16,6 +16,7 @@ class Config:
     assets: list[str] | None = None
     benchmark: str = "TW:0050"
     fx_mode: str = "none"
+    missing_data_policy: str = "warn"
     portfolios: dict = field(default_factory=dict)
     date_mode: str = "intersection"
     custom_start_date: str | None = None
@@ -50,6 +51,8 @@ class Config:
     def validate(self) -> None:
         from .asset_id import parse_asset_id
 
+        if self.missing_data_policy not in {"error", "warn", "ignore"}:
+            raise ValueError("missing_data_policy must be error, warn or ignore")
         if self.fx_mode != "none":
             raise NotImplementedError(
                 "FX_MODE must be none; FX conversion is not implemented"

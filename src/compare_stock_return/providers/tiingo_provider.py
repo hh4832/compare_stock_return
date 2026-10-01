@@ -12,7 +12,7 @@ import pandas as pd
 import requests
 
 from ..asset_id import parse_asset_id
-from ..validation import DataQualityError, validate_assets
+from ..validation import validate_assets
 
 
 class AuthenticationError(RuntimeError):
@@ -39,7 +39,9 @@ def token_from_environment() -> str:
     return token
 
 
-def normalize(rows: list[dict]) -> pd.DataFrame:
+def normalize(
+    rows: list[dict], policy: str = "warn", asset_id: str = "US:provider"
+) -> pd.DataFrame:
     frame = pd.DataFrame(rows)
     if not {"date", "close", "adjClose", "divCash", "splitFactor"} <= set(frame):
         raise ValueError("Tiingo response lacks required EOD fields")
@@ -53,18 +55,8 @@ def normalize(rows: list[dict]) -> pd.DataFrame:
     )
     frame["raw_close"] = frame.close
     frame["adjusted_close"] = frame.adjClose
-    if frame[["raw_close", "adjusted_close"]].isna().any().any():
-        raise DataQualityError(
-            pd.DataFrame(
-                [
-                    dict(
-                        ticker="US:provider",
-                        policy="Tiingo returned a session without both prices",
-                    )
-                ]
-            )
-        )
-    validate_assets({"US:provider": frame})
+    frame.attrs["boundary_rows_are_sessions"] = True
+    validate_assets({asset_id: frame}, policy=policy)
     if (
         not np.isfinite(frame[["divCash", "splitFactor"]]).all().all()
         or (frame.divCash < 0).any()
@@ -117,7 +109,11 @@ class TiingoProvider:
                 )
             if hit:
                 frame = pd.read_parquet(path)
-                frame = normalize(frame.reset_index().to_dict("records"))
+                frame = normalize(
+                    frame.reset_index().to_dict("records"),
+                    policy="ignore",
+                    asset_id=asset,
+                )
             else:
                 token = token_from_environment()
                 try:
@@ -141,7 +137,7 @@ class TiingoProvider:
                     ) from None
                 finally:
                     token = None
-                frame = normalize(rows)
+                frame = normalize(rows, policy="ignore", asset_id=asset)
                 info = dict(
                     request=request,
                     provider="tiingo",
