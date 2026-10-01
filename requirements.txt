@@ -1,4 +1,4 @@
-finlab>=1.5.13,<2
+finlab>=2.2.1,<3
 pandas>=2.2,<3
 numpy>=1.26,<3
 scipy>=1.12,<2
