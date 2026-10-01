@@ -31,6 +31,7 @@ def environment() -> dict:
         "pyarrow",
         "PyYAML",
         "tqdm",
+        "requests",
     ]:
         try:
             packages[name] = importlib.metadata.version(name)

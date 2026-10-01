@@ -60,3 +60,35 @@ def test_missing_auth(monkeypatch):
     monkeypatch.setitem(sys.modules, "google.colab", None)
     with pytest.raises(data_loader.AuthenticationError):
         data_loader.authenticate()
+
+
+def test_prefixed_finlab_contract_and_cache_directory(tmp_path, assets, monkeypatch):
+    from compare_stock_return.providers import legacy_finlab
+    from compare_stock_return.providers.finlab_provider import FinLabProvider
+
+    calls = []
+
+    def fake(config, cache):
+        calls.append((config.symbols, cache))
+        return (
+            {"0050": assets["A"]},
+            {"0050": {"name": "Test", "type": "ETF"}},
+            {"dataset": "etl:adj_close"},
+        )
+
+    monkeypatch.setattr(legacy_finlab, "load", fake)
+    config = Config(assets=["TW:0050"], benchmark="TW:0050")
+    frames, metadata, provenance = FinLabProvider().load(
+        config, config.assets, tmp_path / "finlab"
+    )
+    assert frames["TW:0050"].equals(assets["A"])
+    assert metadata["TW:0050"]["currency"] == "TWD"
+    assert calls[0][0] == ["0050"]
+    assert provenance["dataset"] == "etl:adj_close"
+
+
+def test_known_suspension_kept():
+    config = Config(assets=["TW:0050"], benchmark="TW:0050")
+    config.validate()
+    assert len(config.non_trading_dates["TW:0050"]) == 5
+    assert set(config.non_trading_dates["TW:0050"].values()) == {"market_suspension"}

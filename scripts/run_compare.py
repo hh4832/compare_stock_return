@@ -1,6 +1,10 @@
 """CLI entry point to the same pipeline as Colab."""
 
 import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from compare_stock_return.config import Config
 from compare_stock_return.pipeline import run
@@ -9,7 +13,11 @@ from compare_stock_return.pipeline import run
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", default="config/default.yaml")
-    parser.add_argument("--symbols", nargs="+")
+    parser.add_argument(
+        "--symbols", nargs="+", help="Explicit legacy Taiwan-only layer"
+    )
+    parser.add_argument("--assets", nargs="+")
+    parser.add_argument("--fx-mode", default="none")
     parser.add_argument("--benchmark")
     parser.add_argument(
         "--date-mode", choices=["intersection", "full_history", "custom"]
@@ -24,6 +32,8 @@ def main() -> None:
     config = Config.from_yaml(args.config)
     for arg, field in [
         ("symbols", "symbols"),
+        ("assets", "assets"),
+        ("fx_mode", "fx_mode"),
         ("benchmark", "benchmark"),
         ("date_mode", "date_mode"),
         ("return_type", "return_type"),
@@ -34,6 +44,14 @@ def main() -> None:
         value = getattr(args, arg)
         if value is not None:
             setattr(config, field, value)
+    if args.symbols:
+        if args.assets:
+            parser.error("Use either assets or legacy symbols")
+        config.assets = None
+        config.portfolios = {}
+        config.benchmark = args.benchmark or args.symbols[0]
+    if args.assets and set(args.assets) != set(config.symbols):
+        config.portfolios = {}  # default examples are not compatible with arbitrary CLI assets
     if args.strict:
         config.strict = True
     if args.refresh_cache:

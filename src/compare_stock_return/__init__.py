@@ -1,3 +1,3 @@
-"""Auditable Taiwan asset return comparison."""
+"""Auditable multi-market local-currency return comparison."""
 
 __version__ = "0.1.0"

@@ -13,7 +13,10 @@ TRADING_DAYS = 252
 @dataclass
 class Config:
     symbols: list[str] = field(default_factory=lambda: ["0050", "009816"])
-    benchmark: str = "0050"
+    assets: list[str] | None = None
+    benchmark: str = "TW:0050"
+    fx_mode: str = "none"
+    portfolios: dict = field(default_factory=dict)
     date_mode: str = "intersection"
     custom_start_date: str | None = None
     custom_end_date: str | None = None
@@ -28,10 +31,42 @@ class Config:
     fees: dict = field(default_factory=dict)
     custom_assets: dict = field(default_factory=dict)
     holdings_files: dict = field(default_factory=dict)
-    non_trading_dates: dict = field(default_factory=dict)
+    non_trading_dates: dict = field(
+        default_factory=lambda: {
+            "TW:0050": {
+                d: "market_suspension"
+                for d in [
+                    "2025-06-11",
+                    "2025-06-12",
+                    "2025-06-13",
+                    "2025-06-16",
+                    "2025-06-17",
+                ]
+            }
+        }
+    )
     progress: bool = True
 
     def validate(self) -> None:
+        from .asset_id import parse_asset_id
+
+        if self.fx_mode != "none":
+            raise NotImplementedError(
+                "FX_MODE must be none; FX conversion is not implemented"
+            )
+        # Explicit legacy layer only: symbols are Taiwan identifiers. Preserve old fixture/custom keys.
+        if self.assets is not None:
+            for asset in self.assets:
+                parse_asset_id(asset)
+            self.symbols = list(self.assets)
+            parse_asset_id(self.benchmark)
+        elif self.symbols == ["0050", "009816"] and self.benchmark == "TW:0050":
+            self.assets = ["TW:0050", "TW:009816"]
+            self.symbols = list(self.assets)
+        from .model_portfolio import validate_weights
+
+        for weights in self.portfolios.values():
+            validate_weights(weights, self.symbols)
         if not self.symbols or any(
             not isinstance(s, str) or not s.strip() for s in self.symbols
         ):

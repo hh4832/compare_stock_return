@@ -1,5 +1,4 @@
-symbols: ["0050", "009816"]
-benchmark: "0050"
+benchmark: TW:0050
 date_mode: intersection
 return_type: total_return
 risk_free_rate: 0.0
@@ -13,10 +12,24 @@ display_symbols: null
 fees: {}
 custom_assets: {}
 holdings_files: {}
-non_trading_dates:
-  "0050":
-    "2025-06-11": market_suspension
-    "2025-06-12": market_suspension
-    "2025-06-13": market_suspension
-    "2025-06-16": market_suspension
-    "2025-06-17": market_suspension
+assets:
+- TW:0050
+- TW:009816
+- TW:0056
+- US:VOO
+- US:VGT
+fx_mode: none
+portfolios:
+  TW 0050 only:
+    TW:0050: 1.0
+  0050 + VOO:
+    TW:0050: 0.33
+    US:VOO: 0.67
+  0050 + VOO + VGT:
+    TW:0050: 0.3
+    US:VOO: 0.5
+    US:VGT: 0.2
+  009816 + VOO + VGT:
+    TW:009816: 0.3
+    US:VOO: 0.5
+    US:VGT: 0.2

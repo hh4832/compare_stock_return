@@ -3,6 +3,7 @@
 import logging
 import time
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 from itertools import combinations
 from pathlib import Path
@@ -12,12 +13,15 @@ import yaml
 
 from . import data_loader
 from .alignment import align, usable
+from .asset_id import parse_asset_id
 from .benchmark import relative
+from .cross_market import monthly_metrics
 from .drawdown import episodes
 from .fees import fee_table, synthetic_fee_adjusted
 from .holdings import analyze
 from .metrics import calendar_returns, summary
-from .plotting import export_charts
+from .model_portfolio import simulate
+from .plotting import export_charts, export_portfolio_charts
 from .progress import Progress
 from .reporting import checksums, environment, json_write, promote_latest
 from .returns import return_columns, selected_price
@@ -66,7 +70,7 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
         json_write(run_path / "metadata/package_versions.json", env["packages"])
         progress.enter(2, "Authentication")
         if assets is None:
-            logger.info("FinLab credentials resolved by loader; never serialized")
+            logger.info("Provider credentials resolved by loader; never serialized")
         progress.enter(3, "Loading data / resolving symbols")
         if assets is None:
             assets, asset_metadata, provenance = data_loader.load(
@@ -76,21 +80,70 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
             provenance = {"provider": "injected/custom fixture"}
         if set(assets) != set(config.symbols):
             raise ValueError("Provider assets must exactly match configured symbols")
-        resolve(config.symbols, assets, asset_metadata).to_csv(
-            run_path / "results/assets.csv", index=False
+        identities = (
+            {a: asdict(parse_asset_id(a)) for a in config.symbols}
+            if config.assets is not None
+            else {}
         )
+        resolved = resolve(config.symbols, assets, asset_metadata)
+        if identities:
+            for col in ["asset_id", "symbol", "market", "currency", "provider"]:
+                resolved[col] = resolved.ticker.map(lambda a: identities[a][col])
+        resolved.to_csv(run_path / "results/assets.csv", index=False)
         meta["provenance"] = provenance
+        meta.update(
+            assets=list(identities.values()),
+            fx_mode=config.fx_mode,
+            return_accounting="Cross-market returns are measured in each asset's local currency. FX effects are intentionally excluded.",
+            portfolio_assumptions=dict(
+                rebalancing="monthly",
+                accounting="local-currency model returns",
+                fx="excluded",
+            ),
+            calendar_limitation="Tiingo absent session rows are not independently verified; other markets never define missing sessions",
+        )
+        meta["corporate_action_availability"] = {
+            a: "Tiingo EOD divCash/splitFactor"
+            if {"divCash", "splitFactor"} <= set(frame)
+            else "provider event data unavailable"
+            for a, frame in assets.items()
+        }
+        actions = []
+        for a, frame in assets.items():
+            if {"divCash", "splitFactor"} <= set(frame):
+                actions.append(
+                    frame[["divCash", "splitFactor"]].assign(
+                        asset_id=a, provider="tiingo"
+                    )
+                )
+        (
+            pd.concat(actions)
+            if actions
+            else pd.DataFrame(
+                columns=["divCash", "splitFactor", "asset_id", "provider"]
+            )
+        ).to_parquet(run_path / "data/corporate_actions.parquet")
         progress.enter(4, "Validating data")
         quality = validate_assets(assets, config.non_trading_dates)
         quality.to_csv(run_path / "results/data_quality_report.csv", index=False)
         meta["individual_periods"] = quality.astype(str).to_dict("records")
+        for row in quality.itertuples():
+            for col in ["first_valid_date", "last_valid_date"]:
+                resolved.loc[resolved.ticker == row.ticker, col] = str(
+                    getattr(row, col).date()
+                )
+        resolved.to_csv(run_path / "results/assets.csv", index=False)
         progress.enter(5, "Aligning date ranges")
-        common, window = align(assets)
+        common, window = align(assets, calendar=config.assets is not None)
         meta["common_comparison_range"] = window
         chosen = common
         if config.date_mode == "custom":
             chosen, selected_window = align(
-                assets, config.custom_start_date, config.custom_end_date, config.strict
+                assets,
+                config.custom_start_date,
+                config.custom_end_date,
+                config.strict,
+                calendar=config.assets is not None,
             )
         elif config.date_mode == "full_history":
             chosen = {s: usable(f) for s, f in assets.items()}
@@ -122,11 +175,14 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
         )
         progress.enter(7, "Rolling metrics / drawdowns / risk analytics")
 
-        def table(frames):
+        def table(frames, calendar_window=None):
             return pd.DataFrame(
                 [
                     dict(
                         ticker=s,
+                        common_calendar_start=(calendar_window or {}).get("start_date"),
+                        common_calendar_end=(calendar_window or {}).get("end_date"),
+                        **identities.get(s, {}),
                         **summary(
                             selected_price(f, config.return_type), config.risk_free_rate
                         ),
@@ -135,8 +191,8 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
                 ]
             )
 
-        headline = table(chosen)
-        intersection = table(common)
+        headline = table(chosen, selected_window)
+        intersection = table(common, window)
         full = table({s: usable(f) for s, f in assets.items()})
         full["comparability_warning"] = (
             "NOT DIRECTLY COMPARABLE DUE TO DIFFERENT DATE RANGES"
@@ -169,8 +225,29 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
         pairwise = []
         benchmarks = []
         monthly_excess = []
+        cross_monthly = []
         for a, b in combinations(config.symbols, 2):
-            pair, info = align({a: assets[a], b: assets[b]})
+            pair, info = align(
+                {a: assets[a], b: assets[b]}, calendar=config.assets is not None
+            )
+            cross = bool(
+                identities and identities[a]["market"] != identities[b]["market"]
+            )
+            if cross:
+                result = monthly_metrics(
+                    selected_price(pair[a], config.return_type),
+                    selected_price(pair[b], config.return_type),
+                )
+                result.update(
+                    asset_a=a,
+                    asset_b=b,
+                    start_date=info["start_date"],
+                    end_date=info["end_date"],
+                    per_asset_observations=str(info["per_asset_observations"]),
+                )
+                cross_monthly.append(result)
+                pairwise.append(result)
+                continue
             result = relative(
                 selected_price(pair[a], config.return_type),
                 selected_price(pair[b], config.return_type),
@@ -180,6 +257,7 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
             result.update(
                 asset_a=a,
                 asset_b=b,
+                comparison_type="same_market_daily",
                 calendar_exclusions=str(info["excluded_calendar_dates"]),
             )
             pairwise.append(result)
@@ -187,8 +265,25 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
             if s == config.benchmark:
                 continue
             pair, info = align(
-                {s: assets[s], config.benchmark: assets[config.benchmark]}
+                {s: assets[s], config.benchmark: assets[config.benchmark]},
+                calendar=config.assets is not None,
             )
+            if (
+                identities
+                and identities[s]["market"] != identities[config.benchmark]["market"]
+            ):
+                result = monthly_metrics(
+                    selected_price(pair[s], config.return_type),
+                    selected_price(pair[config.benchmark], config.return_type),
+                )
+                result.update(
+                    ticker=s,
+                    benchmark=config.benchmark,
+                    start_date=info["start_date"],
+                    end_date=info["end_date"],
+                )
+                benchmarks.append(result)
+                continue
             result = relative(
                 selected_price(pair[s], config.return_type),
                 selected_price(pair[config.benchmark], config.return_type),
@@ -201,6 +296,7 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
             result.update(
                 ticker=s,
                 benchmark=config.benchmark,
+                comparison_type="same_market_daily",
                 calendar_exclusions=str(info["excluded_calendar_dates"]),
             )
             benchmarks.append(result)
@@ -235,6 +331,31 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
         ) if monthly_excess else pd.DataFrame(
             columns=["ticker", "benchmark", "period", "excess_return"]
         ).to_csv(run_path / "results/monthly_excess_returns.csv", index=False)
+        meta["comparison_classification"] = [
+            {k: row[k] for k in ("asset_a", "asset_b", "comparison_type")}
+            for row in pairwise
+        ]
+        pd.DataFrame(
+            cross_monthly,
+            columns=None
+            if cross_monthly
+            else [
+                "asset_a",
+                "asset_b",
+                "comparison_type",
+                "monthly_correlation",
+                "monthly_covariance",
+            ],
+        ).to_csv(run_path / "results/cross_market_monthly_metrics.csv", index=False)
+        portfolio_metrics, portfolio_months, portfolio_years, portfolio_navs = simulate(
+            prices, config.portfolios, config.risk_free_rate
+        )
+        for name, frame in [
+            ("model_portfolio_metrics", portfolio_metrics),
+            ("model_portfolio_monthly_returns", portfolio_months),
+            ("model_portfolio_annual_returns", portfolio_years),
+        ]:
+            frame.to_csv(run_path / f"results/{name}.csv", index=False)
         fee_table(config.symbols, config.fees).to_csv(
             run_path / "results/fees.csv", index=False
         )
@@ -270,6 +391,7 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
                 meta["holdings_status"] = f"skipped: {exc}"
         progress.enter(9, "Generating charts")
         export_charts(prices, rolls, config, run_path / "charts")
+        export_portfolio_charts(portfolio_navs, run_path / "charts")
         progress.enter(10, "Exporting results")
         meta.update(
             status="SUCCESS",
@@ -294,6 +416,7 @@ def run(config, assets: dict | None = None, asset_metadata: dict | None = None) 
             run_path=run_path,
             intersection_metrics=intersection,
             summary_metrics=headline,
+            model_portfolio_metrics=portfolio_metrics,
             metadata=meta,
         )
     except Exception as exc:

@@ -43,6 +43,11 @@ def rolling_metrics(prices: pd.Series, risk_free_rate: float = 0) -> pd.DataFram
         * TRADING_DAYS
         / out.volatility_36m.replace(0, np.nan)
     )
+    out["Sharpe_12m"] = (
+        excess.rolling(252).mean()
+        * TRADING_DAYS
+        / out.volatility_12m.replace(0, np.nan)
+    )
     out["maximum_drawdown_12m"] = prices.rolling(252, min_periods=252).apply(
         lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
     )
