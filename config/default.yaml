@@ -13,4 +13,10 @@ display_symbols: null
 fees: {}
 custom_assets: {}
 holdings_files: {}
-non_trading_dates: {}
+non_trading_dates:
+  "0050":
+    "2025-06-11": market_suspension
+    "2025-06-12": market_suspension
+    "2025-06-13": market_suspension
+    "2025-06-16": market_suspension
+    "2025-06-17": market_suspension
