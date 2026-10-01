@@ -1,0 +1,16 @@
+symbols: ["0050", "009816"]
+benchmark: "0050"
+date_mode: intersection
+return_type: total_return
+risk_free_rate: 0.0
+drive_output_root: /content/drive/MyDrive/00Quant_Research/compare_stock_return
+use_cache: true
+refresh_cache: false
+strict: false
+custom_start_date: null
+custom_end_date: null
+display_symbols: null
+fees: {}
+custom_assets: {}
+holdings_files: {}
+non_trading_dates: {}
